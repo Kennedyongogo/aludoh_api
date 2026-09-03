@@ -1,0 +1,447 @@
+const { PublicUser, ChatUnlock } = require("../models");
+const { deductTokens } = require("../services/tokenService");
+const { Op } = require("sequelize");
+const { formatUserForPublicResponse } = require("../utils/userProfile");
+const {
+  PREMIUM_CATEGORIES,
+  CHAT_COST_RULES_TOKENS,
+} = require("../config/pricing");
+const {
+  useWhatsappContactForRegular,
+} = require("../services/subscriptionService");
+
+const filterApprovedPhotos = (photos) => {
+  if (!Array.isArray(photos)) return [];
+  return photos.filter((photo) => photo?.moderation_status === "approved");
+};
+
+const isPremiumCategory = (category) => PREMIUM_CATEGORIES.includes(category);
+
+const getChatCostTokens = (requesterCategory, targetCategory) => {
+  const requesterPremium = isPremiumCategory(requesterCategory);
+  const targetPremium = isPremiumCategory(targetCategory);
+
+  if (!requesterPremium && !targetPremium) {
+    return CHAT_COST_RULES_TOKENS.normalToNormal;
+  }
+
+  if (!requesterPremium && targetPremium) {
+    return CHAT_COST_RULES_TOKENS.normalToPremium;
+  }
+
+  if (requesterPremium && !targetPremium) {
+    return CHAT_COST_RULES_TOKENS.premiumToNormal;
+  }
+
+  return CHAT_COST_RULES_TOKENS.premiumToPremium;
+};
+
+exports.getChatCost = async (req, res) => {
+  try {
+    const { target_user_id } = req.query;
+    const target = await PublicUser.findByPk(target_user_id);
+    if (!target)
+      return res
+        .status(404)
+        .json({ success: false, message: "Target user not found" });
+
+    // Get requester user
+    const requester = await PublicUser.findByPk(req.publicUserId);
+    if (!requester) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Requester user not found" });
+    }
+
+    // Check if chat is already unlocked - if yes, cost is 0
+    const existingUnlock = await ChatUnlock.findOne({
+      where: {
+        public_user_id: req.publicUserId,
+        target_user_id,
+        status: "success",
+      },
+    });
+
+    if (existingUnlock) {
+      // Already unlocked - no cost
+      return res.json({
+        success: true,
+        data: { cost: 0, alreadyUnlocked: true },
+      });
+    }
+
+    const premiumCategories = PREMIUM_CATEGORIES;
+    const isRequesterPremium = premiumCategories.includes(requester.category);
+    const isTargetPremium = premiumCategories.includes(target.category);
+
+    // Check if premium user is trying to unlock another premium user
+    // Premium users can only unlock premium users if target is verified (from Premium Lounge)
+    // Unverified premium users in explore cannot be unlocked by premium users
+    if (isRequesterPremium && isTargetPremium) {
+      // Allow if target is verified (they're from Premium Lounge)
+      if (!target.isVerified) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Premium users cannot unlock unverified premium users from explore. Please proceed to Premium Lounge to unlock verified premium users.",
+          requiresPremiumLounge: true,
+        });
+      }
+      // If target is verified, allow the unlock (they're from Premium Lounge)
+    }
+
+    const cost = getChatCostTokens(requester.category, target.category);
+    return res.json({ success: true, data: { cost, alreadyUnlocked: false } });
+  } catch (err) {
+    console.error("getChatCost error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to compute cost" });
+  }
+};
+
+exports.unlock = async (req, res) => {
+  try {
+    const { target_user_id } = req.body;
+    if (!target_user_id)
+      return res
+        .status(400)
+        .json({ success: false, message: "target_user_id required" });
+
+    // Get requester user
+    const requester = await PublicUser.findByPk(req.publicUserId);
+    if (!requester) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Requester user not found" });
+    }
+
+    const target = await PublicUser.findByPk(target_user_id);
+    if (!target)
+      return res
+        .status(404)
+        .json({ success: false, message: "Target user not found" });
+
+    // Check if chat is already unlocked - if yes, return phone number without charging
+    const existingUnlock = await ChatUnlock.findOne({
+      where: {
+        public_user_id: req.publicUserId,
+        target_user_id,
+        status: "success",
+      },
+    });
+
+    if (existingUnlock) {
+      // Already unlocked - return phone number without charging again
+      const phone = (target.phone || "").replace(/[^\d+]/g, "");
+      const wa = `https://wa.me/${phone.replace(/^\+/, "")}`;
+      return res.json({
+        success: true,
+        data: {
+          phone: target.phone,
+          whatsapp_link: wa,
+          alreadyUnlocked: true, // Flag to indicate it was already unlocked
+        },
+      });
+    }
+
+    const premiumCategories = PREMIUM_CATEGORIES;
+    const isRequesterPremium = premiumCategories.includes(requester.category);
+    const isTargetPremium = premiumCategories.includes(target.category);
+
+    // Regular users: subscription-only flow (no tokens)
+    if (requester.category === "Regular") {
+      const {
+        getActiveSubscriptionForUser,
+        REGULAR_PLANS,
+        usePremiumUnlockForRegular,
+        useWhatsappContactForRegular,
+      } = require("../services/subscriptionService");
+
+      const subscription = await getActiveSubscriptionForUser(req.publicUserId);
+      const plan =
+        subscription && REGULAR_PLANS[subscription.plan]
+          ? REGULAR_PLANS[subscription.plan]
+          : null;
+
+      if (!plan) {
+        return res.status(402).json({
+          success: false,
+          message: "Active subscription required to unlock WhatsApp contacts.",
+        });
+      }
+
+      // Enforce overall unlocked profiles capacity for Regular users
+      const currentUnlockedDistinct = await ChatUnlock.count({
+        where: {
+          public_user_id: req.publicUserId,
+          status: "success",
+        },
+        distinct: true,
+        col: "target_user_id",
+      });
+
+      const maxUnlocked = plan.maxUnlockedProfiles;
+      if (
+        Number.isFinite(maxUnlocked) &&
+        currentUnlockedDistinct >= maxUnlocked
+      ) {
+        return res.status(429).json({
+          success: false,
+          message:
+            "You have reached the maximum unlocked profiles allowed for your plan.",
+        });
+      }
+
+      // If target is premium category, enforce premium unlocks per day
+      if (isTargetPremium) {
+        const premiumUsage = await usePremiumUnlockForRegular(req.publicUserId);
+        if (!premiumUsage.subscription) {
+          return res.status(402).json({
+            success: false,
+            message: "Active subscription required to unlock premium profiles.",
+          });
+        }
+        if (!premiumUsage.allowed) {
+          return res.status(429).json({
+            success: false,
+            message:
+              "Daily premium profile unlock limit reached for your plan.",
+          });
+        }
+      }
+
+      const whatsappUsage = await useWhatsappContactForRegular(
+        req.publicUserId
+      );
+
+      if (!whatsappUsage.subscription) {
+        return res.status(402).json({
+          success: false,
+          message: "Active subscription required to unlock WhatsApp contacts.",
+        });
+      }
+
+      if (!whatsappUsage.allowed) {
+        return res.status(429).json({
+          success: false,
+          message: "Daily WhatsApp contacts limit reached for your plan.",
+        });
+      }
+
+      await ChatUnlock.create({
+        public_user_id: req.publicUserId,
+        target_user_id,
+        token_cost: 0,
+        status: "success",
+      });
+      const phone = (target.phone || "").replace(/[^\d+]/g, "");
+      const wa = `https://wa.me/${phone.replace(/^\+/, "")}`;
+      return res.json({
+        success: true,
+        data: {
+          phone: target.phone,
+          whatsapp_link: wa,
+          usedSubscription: true,
+        },
+      });
+    }
+
+    // Premium category users: subscription-only flow (no tokens)
+    if (isRequesterPremium) {
+      const {
+        getActiveSubscriptionForUser,
+        PREMIUM_PLANS,
+        usePremiumUnlockForPremium,
+        useWhatsappContactForPremium,
+      } = require("../services/subscriptionService");
+
+      const subscription = await getActiveSubscriptionForUser(req.publicUserId);
+      const plan =
+        subscription && PREMIUM_PLANS[subscription.plan]
+          ? PREMIUM_PLANS[subscription.plan]
+          : null;
+
+      if (!plan) {
+        return res.status(402).json({
+          success: false,
+          message: "Active subscription required to unlock WhatsApp contacts.",
+        });
+      }
+
+      // Enforce overall unlocked profiles capacity for Premium users
+      const currentUnlockedDistinct = await ChatUnlock.count({
+        where: {
+          public_user_id: req.publicUserId,
+          status: "success",
+        },
+        distinct: true,
+        col: "target_user_id",
+      });
+
+      const maxUnlocked = plan.maxUnlockedProfiles;
+      if (
+        Number.isFinite(maxUnlocked) &&
+        currentUnlockedDistinct >= maxUnlocked
+      ) {
+        return res.status(429).json({
+          success: false,
+          message:
+            "You have reached the maximum unlocked profiles allowed for your plan.",
+        });
+      }
+
+      // If target is premium category, enforce premium unlocks per day
+      if (isTargetPremium) {
+        const premiumUsage = await usePremiumUnlockForPremium(req.publicUserId);
+        if (!premiumUsage.subscription) {
+          return res.status(402).json({
+            success: false,
+            message: "Active subscription required to unlock premium profiles.",
+          });
+        }
+        if (!premiumUsage.allowed) {
+          return res.status(429).json({
+            success: false,
+            message:
+              "Daily premium profile unlock limit reached for your plan.",
+          });
+        }
+      }
+
+      const whatsappUsage = await useWhatsappContactForPremium(
+        req.publicUserId
+      );
+
+      if (!whatsappUsage.subscription) {
+        return res.status(402).json({
+          success: false,
+          message: "Active subscription required to unlock WhatsApp contacts.",
+        });
+      }
+
+      if (!whatsappUsage.allowed) {
+        return res.status(429).json({
+          success: false,
+          message: "Daily WhatsApp contacts limit reached for your plan.",
+        });
+      }
+
+      await ChatUnlock.create({
+        public_user_id: req.publicUserId,
+        target_user_id,
+        token_cost: 0,
+        status: "success",
+      });
+      const phone = (target.phone || "").replace(/[^\d+]/g, "");
+      const wa = `https://wa.me/${phone.replace(/^\+/, "")}`;
+      return res.json({
+        success: true,
+        data: {
+          phone: target.phone,
+          whatsapp_link: wa,
+          usedSubscription: true,
+        },
+      });
+    }
+
+    // No token fallback - subscription required for all users
+    // If we reach here, user doesn't have a subscription
+    return res.status(402).json({
+      success: false,
+      message: "Active subscription required to unlock WhatsApp contacts. Please subscribe to a plan to continue.",
+    });
+  } catch (err) {
+    console.error("unlock error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to unlock chat" });
+  }
+};
+
+// List all successfully unlocked chats for the current user
+exports.list = async (req, res) => {
+  try {
+    const rows = await ChatUnlock.findAll({
+      where: {
+        public_user_id: req.publicUserId,
+        status: "success", // Only show successful unlocks
+      },
+      include: [
+        {
+          model: PublicUser,
+          as: "target",
+          attributes: [
+            "id",
+            "name",
+            "username",
+            "photo",
+            "photo_moderation_status",
+            "photos",
+            "category",
+            "age",
+            "birth_year",
+            "gender",
+            "bio",
+            "county",
+            "phone",
+            "isVerified",
+            "is_online",
+            "last_seen_at",
+          ],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+    });
+    const formattedRows = rows.map((row) => {
+      const data = row.toJSON();
+      if (data.target) {
+        data.target = formatUserForPublicResponse(data.target);
+        // Hide photo if not approved
+        if (data.target.photo_moderation_status !== "approved") {
+          data.target.photo = null;
+        }
+        // Filter photos array to only show approved photos
+        if (data.target.photos) {
+          data.target.photos = filterApprovedPhotos(data.target.photos);
+        }
+      }
+      return data;
+    });
+    return res.json({ success: true, data: formattedRows });
+  } catch (err) {
+    console.error("chat unlocks list error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to list unlocked chats" });
+  }
+};
+
+// Check if a specific user's chat is unlocked
+exports.checkUnlocked = async (req, res) => {
+  try {
+    const { target_user_id } = req.query;
+    if (!target_user_id)
+      return res
+        .status(400)
+        .json({ success: false, message: "target_user_id required" });
+
+    const unlock = await ChatUnlock.findOne({
+      where: {
+        public_user_id: req.publicUserId,
+        target_user_id,
+        status: "success",
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: { isUnlocked: !!unlock, unlock },
+    });
+  } catch (err) {
+    console.error("check unlocked error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to check unlock status" });
+  }
+};

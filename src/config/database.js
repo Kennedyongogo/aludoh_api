@@ -1,0 +1,166 @@
+// config/database.js
+require("dotenv").config();
+const { Sequelize } = require("sequelize");
+const config = require("./config");
+
+// Determine which connection to use based on NODE_ENV
+const isProduction = process.env.NODE_ENV === "production";
+
+// ✅ Create main Sequelize instance (PgBouncer in production, direct in other environments)
+const sequelize = new Sequelize(
+  isProduction
+    ? config.database.pgbouncer.database
+    : config.database.direct.database,
+  isProduction
+    ? config.database.pgbouncer.username
+    : config.database.direct.username,
+  isProduction
+    ? config.database.pgbouncer.password
+    : config.database.direct.password,
+  {
+    host: isProduction
+      ? config.database.pgbouncer.host
+      : config.database.direct.host,
+    port: isProduction
+      ? config.database.pgbouncer.port
+      : config.database.direct.port,
+    dialect: "postgres",
+    logging: false,
+    pool: {
+      max: isProduction ? 20 : 5,
+      min: isProduction ? 2 : 1, // Keep at least 1 connection alive in dev
+      acquire: 30000,
+      idle: 10000,
+      evict: 1000, // Check for idle connections every second
+    },
+    retry: {
+      max: 3, // Retry up to 3 times
+      match: [
+        /ECONNRESET/,
+        /ETIMEDOUT/,
+        /EHOSTUNREACH/,
+        /ECONNREFUSED/,
+        /SequelizeConnectionError/,
+        /SequelizeConnectionRefusedError/,
+        /SequelizeHostNotFoundError/,
+        /SequelizeHostNotReachableError/,
+        /SequelizeInvalidConnectionError/,
+        /SequelizeConnectionTimedOutError/,
+      ],
+    },
+    dialectOptions: isProduction
+      ? {
+          // PgBouncer specific settings for production
+          application_name: "construction_management_api",
+        }
+      : {},
+  }
+);
+
+// ✅ Create direct database instance for migrations and admin operations
+const directSequelize = new Sequelize(
+  config.database.direct.database,
+  config.database.direct.username,
+  config.database.direct.password,
+  {
+    host: config.database.direct.host,
+    port: config.database.direct.port,
+    dialect: "postgres",
+    logging: false,
+    pool: {
+      max: 5,
+      min: 0,
+      acquire: 30000,
+      idle: 10000,
+      evict: 1000, // Check for idle connections every second
+    },
+    retry: {
+      max: 3, // Retry up to 3 times
+      match: [
+        /ECONNRESET/,
+        /ETIMEDOUT/,
+        /EHOSTUNREACH/,
+        /ECONNREFUSED/,
+        /SequelizeConnectionError/,
+        /SequelizeConnectionRefusedError/,
+        /SequelizeHostNotFoundError/,
+        /SequelizeHostNotReachableError/,
+        /SequelizeInvalidConnectionError/,
+        /SequelizeConnectionTimedOutError/,
+      ],
+    },
+    dialectOptions: {},
+  }
+);
+
+// Helper function to retry database operations
+const retryOperation = async (operation, maxRetries = 3, delay = 1000) => {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      const isConnectionError =
+        error.code === "ECONNRESET" ||
+        error.code === "ETIMEDOUT" ||
+        error.code === "ECONNREFUSED" ||
+        error.name === "SequelizeConnectionError" ||
+        error.name === "SequelizeConnectionRefusedError" ||
+        error.name === "SequelizeHostNotFoundError" ||
+        error.name === "SequelizeConnectionTimedOutError";
+
+      if (isConnectionError && attempt < maxRetries) {
+        console.warn(
+          `⚠️ Connection error (attempt ${attempt}/${maxRetries}): ${error.message}. Retrying in ${delay}ms...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        // Exponential backoff
+        delay *= 2;
+        continue;
+      }
+      throw error;
+    }
+  }
+};
+
+// Test connections with retry logic
+const testConnections = async () => {
+  try {
+    await retryOperation(async () => {
+      await sequelize.authenticate();
+      console.log(
+        `✅ ${
+          isProduction ? "PgBouncer" : "Direct"
+        } connection established successfully.`
+      );
+    });
+
+    await retryOperation(async () => {
+      await directSequelize.authenticate();
+      console.log("✅ Direct database connection established successfully.");
+    });
+  } catch (error) {
+    console.error("❌ Database connection error:", error);
+    console.error("❌ Connection details:", {
+      host: isProduction
+        ? config.database.pgbouncer.host
+        : config.database.direct.host,
+      port: isProduction
+        ? config.database.pgbouncer.port
+        : config.database.direct.port,
+      database: isProduction
+        ? config.database.pgbouncer.database
+        : config.database.direct.database,
+      username: isProduction
+        ? config.database.pgbouncer.username
+        : config.database.direct.username,
+    });
+    throw error;
+  }
+};
+
+// Export both instances
+module.exports = {
+  sequelize, // Main connection (PgBouncer in production, direct in other environments)
+  directSequelize, // Direct connection for migrations
+  testConnections,
+};

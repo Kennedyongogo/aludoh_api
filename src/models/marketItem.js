@@ -1,0 +1,56 @@
+const { DataTypes } = require("sequelize");
+
+module.exports = (sequelize) => {
+  const MarketItem = sequelize.define(
+    "MarketItem",
+    {
+      id: {
+        type: DataTypes.UUID,
+        primaryKey: true,
+        defaultValue: DataTypes.UUIDV4,
+      },
+      title: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
+      description: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      price: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false,
+      },
+      images: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        defaultValue: [],
+      },
+      whatsapp_number: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      is_featured: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+      },
+      tag: {
+        type: DataTypes.ENUM("hot_deals", "weekend_picks", "none"),
+        allowNull: false,
+        defaultValue: "none",
+      },
+      created_by: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        references: { model: "admin_users", key: "id" },
+      },
+    },
+    {
+      tableName: "market_items",
+      timestamps: true,
+      updatedAt: false,
+    }
+  );
+
+  return MarketItem;
+};
