@@ -15,6 +15,12 @@ const convertToRelativePath = (absolutePath) => {
   return relativePath;
 };
 
+const uploadedPath = (file) => {
+  if (!file) return null;
+  return convertToRelativePath(file.path) || null;
+};
+
 module.exports = {
   convertToRelativePath,
+  uploadedPath,
 };

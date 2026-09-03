@@ -13,7 +13,10 @@ const normalizePhoneNumber = (input) => {
 };
 
 const validatePhoneNumber = (input) => {
-  const normalized = normalizePhoneNumber(input);
+  let normalized = normalizePhoneNumber(input);
+  if (/^0[17]\d{8}$/.test(normalized)) {
+    normalized = `+254${normalized.slice(1)}`;
+  }
 
   if (!normalized) {
     return {

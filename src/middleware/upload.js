@@ -2,142 +2,55 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// Configure multer storage
+const fieldFolders = {
+  image: "services",
+  service_image: "services",
+  project_image: "projects",
+  project_images: "projects",
+  featured_image: "articles",
+  cover_image: "galleries",
+  gallery_image: "galleries",
+  file: "media",
+  media: "media",
+  photo: "testimonials",
+  testimonial_photo: "testimonials",
+  logo: "misc",
+};
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Determine upload directory based on file type
-    let uploadPath;
+    const folder = fieldFolders[file.fieldname] || "misc";
+    const uploadPath = path.join(__dirname, "..", "..", "uploads", folder);
 
-    if (
-      file.fieldname === "project_image" ||
-      file.fieldname === "project_images" ||
-      file.fieldname === "update_images"
-    ) {
-      uploadPath = path.join(__dirname, "..", "..", "uploads", "projects");
-    } else if (
-      file.fieldname === "profile_image" ||
-      file.fieldname === "profile_images"
-    ) {
-      uploadPath = path.join(__dirname, "..", "..", "uploads", "profiles");
-    } else if (file.fieldname === "market_images") {
-      uploadPath = path.join(__dirname, "..", "..", "uploads", "market");
-    } else if (
-      file.fieldname === "document" ||
-      file.fieldname === "documents" ||
-      file.fieldname === "file"
-    ) {
-      uploadPath = path.join(__dirname, "..", "..", "uploads", "documents");
-    } else if (file.fieldname === "inquiry_attachment") {
-      uploadPath = path.join(__dirname, "..", "..", "uploads", "inquiries");
-    } else if (
-      file.fieldname === "story_media" ||
-      file.fieldname === "story_photo" ||
-      file.fieldname === "story_video"
-    ) {
-      uploadPath = path.join(__dirname, "..", "..", "uploads", "stories");
-    } else if (
-      file.fieldname === "post_media" ||
-      file.fieldname === "post_photo" ||
-      file.fieldname === "post_video"
-    ) {
-      uploadPath = path.join(__dirname, "..", "..", "uploads", "posts");
-    } else if (
-      file.fieldname === "audio_file" ||
-      file.fieldname === "music_audio"
-    ) {
-      uploadPath = path.join(__dirname, "..", "..", "uploads", "music", "audio");
-    } else if (
-      file.fieldname === "cover_image" ||
-      file.fieldname === "music_cover"
-    ) {
-      uploadPath = path.join(__dirname, "..", "..", "uploads", "music", "covers");
-    } else {
-      uploadPath = path.join(__dirname, "..", "..", "uploads", "misc");
-    }
-
-    console.log("📁 Upload destination:", uploadPath);
-    console.log("📁 Directory exists:", fs.existsSync(uploadPath));
-
-    // Create directory if it doesn't exist
     if (!fs.existsSync(uploadPath)) {
       fs.mkdirSync(uploadPath, { recursive: true });
-      console.log("📁 Created directory:", uploadPath);
     }
 
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
-    // Generate unique filename with timestamp
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     const extension = path.extname(file.originalname);
     const basename = path.basename(file.originalname, extension);
-    // Sanitize filename
     const sanitizedBasename = basename.replace(/[^a-zA-Z0-9]/g, "_");
-    const filename = `${sanitizedBasename}-${uniqueSuffix}${extension}`;
-    console.log("📄 Generated filename:", filename);
-    cb(null, filename);
+    cb(null, `${sanitizedBasename}-${uniqueSuffix}${extension}`);
   },
 });
 
-// File filter to allow specific file types
 const fileFilter = (req, file, cb) => {
   const allowedTypes = {
-    // Images
     "image/jpeg": ".jpg",
     "image/jpg": ".jpg",
     "image/png": ".png",
     "image/gif": ".gif",
     "image/webp": ".webp",
-    // Videos
     "video/mp4": ".mp4",
-    "video/mpeg": ".mpeg",
-    "video/quicktime": ".mov",
-    "video/x-msvideo": ".avi",
     "video/webm": ".webm",
-    // Audio
-    "audio/mpeg": ".mp3",
-    "audio/mp3": ".mp3",
-    "audio/mp4": ".m4a",
-    "audio/wav": ".wav",
-    "audio/wave": ".wav",
-    "audio/x-wav": ".wav",
-    "audio/ogg": ".ogg",
-    "audio/oga": ".oga",
-    "audio/m4a": ".m4a",
-    "audio/x-m4a": ".m4a",
-    "audio/aac": ".aac",
-    // Documents
     "application/pdf": ".pdf",
-    "application/msword": ".doc",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-      ".docx",
-    "application/vnd.ms-excel": ".xls",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-      ".xlsx",
-    "application/vnd.ms-powerpoint": ".ppt",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-      ".pptx",
-    "text/plain": ".txt",
-    "text/csv": ".csv",
   };
 
-  // Allow audio files by extension if mimetype check fails (some systems report different mimetypes)
   if (allowedTypes[file.mimetype]) {
     cb(null, true);
-  } else if (file.fieldname === "audio_file" || file.fieldname === "music_audio") {
-    // For audio files, also check by extension
-    const ext = path.extname(file.originalname).toLowerCase();
-    const audioExtensions = [".mp3", ".wav", ".ogg", ".m4a", ".aac", ".oga"];
-    if (audioExtensions.includes(ext)) {
-      cb(null, true);
-    } else {
-      cb(
-        new Error(
-          `Invalid audio file type. Allowed extensions: ${audioExtensions.join(", ")}`
-        ),
-        false
-      );
-    }
   } else {
     cb(
       new Error(
@@ -150,151 +63,39 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Configure multer
 const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
+  storage,
+  fileFilter,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB limit (for videos)
+    fileSize: 20 * 1024 * 1024,
   },
 });
 
-// Middleware for single profile picture upload (optional - allows requests without files)
-const uploadProfileImage = (req, res, next) => {
-  // Only process multipart/form-data requests
+const maybeMultipart = (middleware) => (req, res, next) => {
   if (
     req.headers["content-type"] &&
     req.headers["content-type"].includes("multipart/form-data")
   ) {
-    upload.single("profile_image")(req, res, next);
-  } else {
-    // For JSON requests, skip file upload processing
-    next();
+    return middleware(req, res, next);
   }
+  next();
 };
 
-// Middleware for multiple profile images upload (optional - allows requests without files)
-const uploadProfileImages = (req, res, next) => {
-  // Only process multipart/form-data requests
-  if (
-    req.headers["content-type"] &&
-    req.headers["content-type"].includes("multipart/form-data")
-  ) {
-    // Support both single profile_image and multiple profile_images
-    upload.fields([
-      { name: "profile_image", maxCount: 1 },
-      { name: "profile_images", maxCount: 10 },
-    ])(req, res, next);
-  } else {
-    // For JSON requests, skip file upload processing
-    next();
-  }
-};
+const uploadServiceImage = maybeMultipart(upload.single("image"));
+const uploadProjectImage = maybeMultipart(upload.single("project_image"));
+const uploadProjectImages = maybeMultipart(upload.array("project_images", 10));
+const uploadArticleImage = maybeMultipart(upload.single("featured_image"));
+const uploadGalleryImage = maybeMultipart(upload.single("cover_image"));
+const uploadMediaFile = maybeMultipart(upload.single("file"));
+const uploadTestimonialPhoto = maybeMultipart(upload.single("photo"));
+const uploadLogo = maybeMultipart(upload.single("logo"));
 
-// Middleware for single document upload
-const uploadDocument = upload.single("document");
-
-// Middleware for file upload (generic)
-const uploadFile = upload.single("file");
-
-// Middleware for multiple documents upload
-const uploadDocuments = upload.array("documents", 10); // Max 10 files
-
-// Middleware for project images
-const uploadProjectImage = upload.single("project_image");
-
-// Middleware for multiple project images with text fields
-const uploadProjectImages = upload.any();
-
-// Middleware for inquiry attachments
-const uploadInquiryAttachment = upload.single("inquiry_attachment");
-
-// Middleware for market item images
-const uploadMarketImage = upload.single("image");
-
-// Middleware for multiple market item images
-const uploadMarketImages = (req, res, next) => {
-  // Only process multipart/form-data requests
-  if (
-    req.headers["content-type"] &&
-    req.headers["content-type"].includes("multipart/form-data")
-  ) {
-    upload.array("market_images", 10)(req, res, next);
-  } else {
-    // For JSON requests, skip file upload processing
-    next();
-  }
-};
-
-// Middleware for story media (photo or video)
-const uploadStoryMedia = (req, res, next) => {
-  if (
-    req.headers["content-type"] &&
-    req.headers["content-type"].includes("multipart/form-data")
-  ) {
-    upload.single("story_media")(req, res, next);
-  } else {
-    next();
-  }
-};
-
-// Middleware for multiple story media files
-const uploadStoryMediaMultiple = (req, res, next) => {
-  if (
-    req.headers["content-type"] &&
-    req.headers["content-type"].includes("multipart/form-data")
-  ) {
-    upload.fields([
-      { name: "story_photo", maxCount: 1 },
-      { name: "story_video", maxCount: 1 },
-      { name: "story_media", maxCount: 10 },
-    ])(req, res, next);
-  } else {
-    next();
-  }
-};
-
-// Middleware for post media (photo or video)
-const uploadPostMedia = (req, res, next) => {
-  if (
-    req.headers["content-type"] &&
-    req.headers["content-type"].includes("multipart/form-data")
-  ) {
-    upload.single("post_media")(req, res, next);
-  } else {
-    next();
-  }
-};
-
-// Middleware for music files (audio and cover image)
-const uploadMusicFiles = (req, res, next) => {
-  if (
-    req.headers["content-type"] &&
-    req.headers["content-type"].includes("multipart/form-data")
-  ) {
-    upload.fields([
-      { name: "audio_file", maxCount: 1 },
-      { name: "cover_image", maxCount: 1 },
-    ])(req, res, next);
-  } else {
-    next();
-  }
-};
-
-// Middleware for mixed uploads (multiple fields)
-const uploadMixed = upload.fields([
-  { name: "profile_image", maxCount: 1 },
-  { name: "document", maxCount: 1 },
-  { name: "documents", maxCount: 10 },
-]);
-
-// Error handling middleware for multer
 const handleUploadError = (error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     if (error.code === "LIMIT_FILE_SIZE") {
       return res.status(400).json({
         success: false,
-        message: "File too large. Maximum size is 10MB.",
+        message: "File too large. Maximum size is 20MB.",
       });
     }
     if (error.code === "LIMIT_FILE_COUNT") {
@@ -311,7 +112,7 @@ const handleUploadError = (error, req, res, next) => {
     }
   }
 
-  if (error && error.message.includes("Invalid file type")) {
+  if (error && error.message && error.message.includes("Invalid file type")) {
     return res.status(400).json({
       success: false,
       message: error.message,
@@ -321,12 +122,10 @@ const handleUploadError = (error, req, res, next) => {
   next(error);
 };
 
-// Helper function to delete file
 const deleteFile = async (filePath) => {
   try {
-    if (fs.existsSync(filePath)) {
+    if (filePath && fs.existsSync(filePath)) {
       await fs.promises.unlink(filePath);
-      console.log("🗑️ Deleted file:", filePath);
       return true;
     }
     return false;
@@ -336,52 +135,15 @@ const deleteFile = async (filePath) => {
   }
 };
 
-// Helper function to get file type from mimetype
-const getFileType = (mimetype) => {
-  if (mimetype.startsWith("image/")) return "image";
-  if (mimetype === "application/pdf") return "pdf";
-  if (
-    mimetype === "application/msword" ||
-    mimetype ===
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-  ) {
-    return "word";
-  }
-  if (
-    mimetype === "application/vnd.ms-excel" ||
-    mimetype ===
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  ) {
-    return "excel";
-  }
-  if (
-    mimetype === "application/vnd.ms-powerpoint" ||
-    mimetype ===
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-  ) {
-    return "powerpoint";
-  }
-  if (mimetype === "text/plain" || mimetype === "text/csv") return "text";
-  return "other";
-};
-
 module.exports = {
-  uploadProfileImage,
-  uploadProfileImages,
-  uploadDocument,
-  uploadFile,
-  uploadDocuments,
+  uploadServiceImage,
   uploadProjectImage,
   uploadProjectImages,
-  uploadInquiryAttachment,
-  uploadMarketImage,
-  uploadMarketImages,
-  uploadStoryMedia,
-  uploadStoryMediaMultiple,
-  uploadPostMedia,
-  uploadMusicFiles,
-  uploadMixed,
+  uploadArticleImage,
+  uploadGalleryImage,
+  uploadMediaFile,
+  uploadTestimonialPhoto,
+  uploadLogo,
   handleUploadError,
   deleteFile,
-  getFileType,
 };
