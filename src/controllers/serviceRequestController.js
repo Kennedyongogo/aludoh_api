@@ -92,11 +92,6 @@ exports.create = async (req, res) => {
       organization,
     } = req.body;
 
-    if (!service_id)
-      return res
-        .status(400)
-        .json({ success: false, message: "service_id is required" });
-
     let resolvedClientId = client_id;
     if (!resolvedClientId) {
       if (!name || !phone)
@@ -117,7 +112,7 @@ exports.create = async (req, res) => {
 
     const row = await ServiceRequest.create({
       client_id: resolvedClientId,
-      service_id,
+      service_id: service_id || null,
       location: location || null,
       description: description || null,
       status: status || "new",
