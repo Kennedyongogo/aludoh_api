@@ -2,42 +2,16 @@ const express = require("express");
 const path = require("path");
 const cors = require("cors");
 const fs = require("fs");
-const { initializeModels, setupAssociations } = require("./models");
+const { initializeModels } = require("./models");
 const { errorHandler } = require("./middleware/errorHandler");
 
 const userRoutes = require("./routes/userRoutes");
-const roleRoutes = require("./routes/roleRoutes");
-const permissionRoutes = require("./routes/permissionRoutes");
-const clientRoutes = require("./routes/clientRoutes");
-const serviceRoutes = require("./routes/serviceRoutes");
 const serviceRequestRoutes = require("./routes/serviceRequestRoutes");
-const projectRoutes = require("./routes/projectRoutes");
-const projectImageRoutes = require("./routes/projectImageRoutes");
-const trainingCourseRoutes = require("./routes/trainingCourseRoutes");
-const trainingSessionRoutes = require("./routes/trainingSessionRoutes");
-const trainingRegistrationRoutes = require("./routes/trainingRegistrationRoutes");
-const certificateRoutes = require("./routes/certificateRoutes");
-const categoryRoutes = require("./routes/categoryRoutes");
-const articleRoutes = require("./routes/articleRoutes");
-const galleryRoutes = require("./routes/galleryRoutes");
-const mediaRoutes = require("./routes/mediaRoutes");
-const testimonialRoutes = require("./routes/testimonialRoutes");
-const contactMessageRoutes = require("./routes/contactMessageRoutes");
-const siteSettingRoutes = require("./routes/siteSettingRoutes");
-const statsRoutes = require("./routes/statsRoutes");
 const { forgotPassword } = require("./controllers/userController");
 
 const app = express();
 const uploadsRoot = path.join(__dirname, "..", "uploads");
-const uploadFolders = [
-  "projects",
-  "services",
-  "articles",
-  "galleries",
-  "media",
-  "testimonials",
-  "misc",
-];
+const uploadFolders = ["misc"];
 
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ limit: "20mb", extended: true }));
@@ -46,25 +20,7 @@ app.use("/uploads", express.static(uploadsRoot));
 
 console.log("🔗 Registering API routes...");
 app.use("/api/users", userRoutes);
-app.use("/api/roles", roleRoutes);
-app.use("/api/permissions", permissionRoutes);
-app.use("/api/clients", clientRoutes);
-app.use("/api/services", serviceRoutes);
 app.use("/api/service-requests", serviceRequestRoutes);
-app.use("/api/projects", projectRoutes);
-app.use("/api/project-images", projectImageRoutes);
-app.use("/api/training-courses", trainingCourseRoutes);
-app.use("/api/training-sessions", trainingSessionRoutes);
-app.use("/api/training-registrations", trainingRegistrationRoutes);
-app.use("/api/certificates", certificateRoutes);
-app.use("/api/categories", categoryRoutes);
-app.use("/api/articles", articleRoutes);
-app.use("/api/galleries", galleryRoutes);
-app.use("/api/media", mediaRoutes);
-app.use("/api/testimonials", testimonialRoutes);
-app.use("/api/contact-messages", contactMessageRoutes);
-app.use("/api/site-settings", siteSettingRoutes);
-app.use("/api/stats", statsRoutes);
 app.post("/api/auth/forgot", forgotPassword);
 console.log("✅ All API routes registered");
 
@@ -110,9 +66,6 @@ const initializeApp = async () => {
 
     await initializeModels();
     console.log("✅ Database models initialized");
-
-    setupAssociations();
-    console.log("✅ Model associations configured");
 
     console.log("✅ Application initialized successfully");
     return true;

@@ -1,9 +1,6 @@
 const jwt = require("jsonwebtoken");
-const { User, Role } = require("../models");
+const { User } = require("../models");
 const config = require("../config/config");
-
-const isSuperAdminRole = (slug) =>
-  slug === "super-admin" || slug === "superadmin";
 
 // Authenticate admin users
 exports.authenticateAdmin = async (req, res, next) => {
@@ -18,7 +15,6 @@ exports.authenticateAdmin = async (req, res, next) => {
   }
 
   try {
-    // Verify the token
     const decoded = jwt.verify(token, config.jwtSecret);
 
     if (decoded.type !== "admin") {
@@ -30,28 +26,25 @@ exports.authenticateAdmin = async (req, res, next) => {
 
     const admin = await User.findByPk(decoded.id, {
       attributes: { exclude: ["password"] },
-      include: [{ model: Role, as: "role" }],
     });
 
-    if (!admin || admin.status === "inactive") {
+    if (!admin) {
       return res.status(403).json({
         success: false,
-        message: "Access denied, invalid or inactive admin",
+        message: "Access denied, invalid admin",
       });
     }
 
-    // Attach user info to request
     req.userId = admin.id;
     req.user = admin;
     req.userType = "admin";
-    req.adminRole = admin.role?.slug || null;
 
     next();
   } catch (error) {
     console.error("Admin auth error:", error);
-    res.status(400).json({
+    res.status(401).json({
       success: false,
-      message: "Invalid token",
+      message: "Invalid or expired token",
     });
   }
 };
@@ -65,7 +58,7 @@ exports.optionalAuth = async (req, res, next) => {
   const token = authHeader && authHeader.split(" ")[1];
 
   if (!token) {
-    return next(); // Continue without authentication
+    return next();
   }
 
   try {
@@ -74,33 +67,19 @@ exports.optionalAuth = async (req, res, next) => {
     if (decoded.type === "admin") {
       const admin = await User.findByPk(decoded.id, {
         attributes: { exclude: ["password"] },
-        include: [{ model: Role, as: "role" }],
       });
 
-      if (admin && admin.status !== "inactive") {
+      if (admin) {
         req.userId = admin.id;
         req.user = admin;
         req.userType = "admin";
-        req.adminRole = admin.role?.slug || null;
       }
     }
 
     next();
   } catch (error) {
-    // If token is invalid, continue without authentication
     next();
   }
-};
-
-// Check if admin has superadmin role
-exports.requireSuperAdmin = (req, res, next) => {
-  if (req.userType !== "admin" || !isSuperAdminRole(req.adminRole)) {
-    return res.status(403).json({
-      success: false,
-      message: "Access denied, super-admin privileges required",
-    });
-  }
-  next();
 };
 
 module.exports = exports;

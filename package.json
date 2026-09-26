@@ -6,6 +6,9 @@
   "scripts": {
     "start": "nodemon src/server.js",
     "start:cluster": "node src/cluster.js",
+    "migrate:users": "node scripts/dropUserRoleStatus.js",
+    "create:user": "node scripts/createUser.js",
+    "migrate:service-requests": "node scripts/migrateServiceRequests.js",
     "test": "echo \"No tests specified\" && exit 0"
   },
   "author": "Duncan Muteti",

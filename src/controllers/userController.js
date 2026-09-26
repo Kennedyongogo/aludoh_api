@@ -1,28 +1,16 @@
-const { User, Role } = require("../models");
+const { User } = require("../models");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 const config = require("../config/config");
 const { Op, Sequelize } = require("sequelize");
-const userInclude = [{ model: Role, as: "role" }];
+
+const SORTABLE_FIELDS = ["name", "email", "phone", "createdAt", "updatedAt"];
 
 const sanitizeUser = (user) => {
-  const data = user.toJSON ? user.toJSON() : user;
+  const data = user.toJSON ? user.toJSON() : { ...user };
   delete data.password;
   return data;
-};
-
-const ensureSuperAdminRole = async () => {
-  const [role] = await Role.findOrCreate({
-    where: { slug: "super-admin" },
-    defaults: {
-      name: "Super Admin",
-      slug: "super-admin",
-      description: "Full access to the admin portal",
-      status: "active",
-    },
-  });
-  return role;
 };
 
 exports.setup = async (req, res) => {
@@ -43,22 +31,18 @@ exports.setup = async (req, res) => {
       });
     }
 
-    const role = await ensureSuperAdminRole();
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await User.create({
       name,
       email,
       password: hashedPassword,
       phone: phone || null,
-      role_id: role.id,
-      status: "active",
     });
 
-    const created = await User.findByPk(user.id, { include: userInclude });
     return res.status(201).json({
       success: true,
       message: "First admin created successfully",
-      data: sanitizeUser(created),
+      data: sanitizeUser(user),
     });
   } catch (error) {
     console.error("Error creating first user:", error);
@@ -73,10 +57,14 @@ exports.setup = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({
-      where: { email },
-      include: userInclude,
-    });
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    const user = await User.findOne({ where: { email } });
 
     if (!user) {
       return res.status(401).json({
@@ -93,19 +81,11 @@ exports.login = async (req, res) => {
       });
     }
 
-    if (user.status === "inactive") {
-      return res.status(403).json({
-        success: false,
-        message: "Account is inactive",
-      });
-    }
-
     const token = jwt.sign(
       {
         id: user.id,
         email: user.email,
         type: "admin",
-        role: user.role?.slug,
       },
       config.jwtSecret,
       { expiresIn: "7d" }
@@ -202,11 +182,11 @@ exports.forgotPassword = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { name, email, password, phone, role_id, status } = req.body;
-    if (!name || !email || !password || !role_id) {
+    const { name, email, password, phone } = req.body;
+    if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
-        message: "Name, email, password, and role_id are required",
+        message: "Name, email, and password are required",
       });
     }
 
@@ -224,15 +204,12 @@ exports.create = async (req, res) => {
       email,
       password: hashedPassword,
       phone: phone || null,
-      role_id,
-      status: status || "active",
     });
 
-    const created = await User.findByPk(user.id, { include: userInclude });
     return res.status(201).json({
       success: true,
       message: "User created successfully",
-      data: sanitizeUser(created),
+      data: sanitizeUser(user),
     });
   } catch (error) {
     console.error("Error creating user:", error);
@@ -249,20 +226,18 @@ exports.list = async (req, res) => {
     const {
       page = 1,
       limit = 10,
-      role_id,
-      status,
       search,
       sortBy = "createdAt",
       sortOrder = "DESC",
     } = req.query;
 
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+    const pageNum = Math.max(parseInt(page) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit) || 10, 1), 100);
     const offset = (pageNum - 1) * limitNum;
+    const orderField = SORTABLE_FIELDS.includes(sortBy) ? sortBy : "createdAt";
+    const orderDir = String(sortOrder).toUpperCase() === "ASC" ? "ASC" : "DESC";
     const whereClause = {};
 
-    if (role_id) whereClause.role_id = role_id;
-    if (status) whereClause.status = status;
     if (search) {
       whereClause[Op.or] = [
         { name: { [Op.iLike]: `%${search}%` } },
@@ -274,10 +249,9 @@ exports.list = async (req, res) => {
     const { count, rows } = await User.findAndCountAll({
       where: whereClause,
       attributes: { exclude: ["password"] },
-      include: userInclude,
       limit: limitNum,
       offset,
-      order: [[sortBy, sortOrder]],
+      order: [[orderField, orderDir]],
     });
 
     return res.status(200).json({
@@ -304,7 +278,6 @@ exports.getById = async (req, res) => {
   try {
     const user = await User.findByPk(req.params.id, {
       attributes: { exclude: ["password"] },
-      include: userInclude,
     });
 
     if (!user) {
@@ -335,24 +308,27 @@ exports.update = async (req, res) => {
       });
     }
 
-    const { name, email, phone, role_id, status } = req.body;
+    const { name, email, phone } = req.body;
     const updateData = {};
     if (name) updateData.name = name;
-    if (email) updateData.email = email;
-    if (phone !== undefined) updateData.phone = phone;
-    if (role_id) updateData.role_id = role_id;
-    if (status) updateData.status = status;
+    if (phone !== undefined) updateData.phone = phone || null;
+    if (email && email !== user.email) {
+      const taken = await User.findOne({ where: { email } });
+      if (taken) {
+        return res.status(400).json({
+          success: false,
+          message: "User with this email already exists",
+        });
+      }
+      updateData.email = email;
+    }
 
     await user.update(updateData);
-    const updated = await User.findByPk(user.id, {
-      attributes: { exclude: ["password"] },
-      include: userInclude,
-    });
 
     return res.status(200).json({
       success: true,
       message: "Profile updated successfully",
-      data: updated,
+      data: sanitizeUser(user),
     });
   } catch (error) {
     console.error("Error updating user:", error);
@@ -367,6 +343,13 @@ exports.update = async (req, res) => {
 exports.changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password and new password are required",
+      });
+    }
+
     const user = await User.findByPk(req.params.id);
     if (!user) {
       return res.status(404).json({
@@ -405,6 +388,13 @@ exports.changePassword = async (req, res) => {
 
 exports.remove = async (req, res) => {
   try {
+    if (req.params.id === req.userId) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot delete your own account",
+      });
+    }
+
     const user = await User.findByPk(req.params.id);
     if (!user) {
       return res.status(404).json({

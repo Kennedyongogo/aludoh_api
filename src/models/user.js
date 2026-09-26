@@ -27,16 +27,6 @@ module.exports = (sequelize) => {
         type: DataTypes.STRING,
         allowNull: true,
       },
-      role_id: {
-        type: DataTypes.UUID,
-        allowNull: false,
-        references: { model: "roles", key: "id" },
-      },
-      status: {
-        type: DataTypes.ENUM("active", "inactive"),
-        allowNull: false,
-        defaultValue: "active",
-      },
     },
     {
       tableName: "users",
@@ -45,12 +35,6 @@ module.exports = (sequelize) => {
         {
           unique: true,
           fields: ["email"],
-        },
-        {
-          fields: ["role_id"],
-        },
-        {
-          fields: ["status"],
         },
       ],
     }
