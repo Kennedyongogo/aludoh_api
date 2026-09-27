@@ -9,6 +9,7 @@
     "migrate:users": "node scripts/dropUserRoleStatus.js",
     "create:user": "node scripts/createUser.js",
     "migrate:service-requests": "node scripts/migrateServiceRequests.js",
+    "seed:service-requests": "node scripts/seedServiceRequests.js",
     "test": "echo \"No tests specified\" && exit 0"
   },
   "author": "Duncan Muteti",

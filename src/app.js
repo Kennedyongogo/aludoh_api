@@ -7,7 +7,9 @@ const { errorHandler } = require("./middleware/errorHandler");
 
 const userRoutes = require("./routes/userRoutes");
 const serviceRequestRoutes = require("./routes/serviceRequestRoutes");
+const countyRoutes = require("./routes/countyRoutes");
 const { forgotPassword } = require("./controllers/userController");
+const { resumePendingGeocodes } = require("./services/geocoder");
 
 const app = express();
 const uploadsRoot = path.join(__dirname, "..", "uploads");
@@ -21,6 +23,7 @@ app.use("/uploads", express.static(uploadsRoot));
 console.log("🔗 Registering API routes...");
 app.use("/api/users", userRoutes);
 app.use("/api/service-requests", serviceRequestRoutes);
+app.use("/api/counties", countyRoutes);
 app.post("/api/auth/forgot", forgotPassword);
 console.log("✅ All API routes registered");
 
@@ -66,6 +69,9 @@ const initializeApp = async () => {
 
     await initializeModels();
     console.log("✅ Database models initialized");
+
+    // Not awaited: backlog lookups are throttled and can take a while
+    resumePendingGeocodes();
 
     console.log("✅ Application initialized successfully");
     return true;

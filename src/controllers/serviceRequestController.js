@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const { Op } = require("sequelize");
 const { ServiceRequest, User, sequelize } = require("../models");
 const { validatePhoneNumber } = require("../utils/phone");
+const { EMPTY_GEO, geocodeRequest, queueGeocode } = require("../services/geocoder");
 
 const { STATUSES, PRIORITIES } = ServiceRequest;
 
@@ -167,8 +168,11 @@ exports.create = async (req, res) => {
     OPTIONAL_FIELDS.forEach((field) => {
       data[field] = cleanText(req.body[field], field);
     });
+    if (data.location) data.geo_status = "pending";
 
     const request = await createWithUniqueReference(data);
+    // Runs after the response so the client never waits on the map lookup
+    if (data.location) queueGeocode(request.id);
 
     return res.status(201).json({
       success: true,
@@ -377,7 +381,14 @@ exports.update = async (req, res) => {
       return res.status(400).json({ success: false, message: "Nothing to update" });
     }
 
+    const locationChanged =
+      changes.location !== undefined && changes.location !== request.location;
+    if (locationChanged) {
+      Object.assign(changes, EMPTY_GEO, { geo_status: changes.location ? "pending" : null });
+    }
+
     await request.update(changes);
+    if (locationChanged && changes.location) queueGeocode(request.id);
 
     return res.status(200).json({
       success: true,
@@ -386,6 +397,70 @@ exports.update = async (req, res) => {
     });
   } catch (error) {
     return sendValidationOrServerError(res, "updating service request", error);
+  }
+};
+
+// Admin: every request with a location, plus where it was estimated to be, for the map
+exports.locations = async (req, res) => {
+  try {
+    const rows = await ServiceRequest.findAll({
+      attributes: [
+        "id",
+        "reference",
+        "name",
+        "service",
+        "status",
+        "priority",
+        "location",
+        "geo_status",
+        "geo_place",
+        "geo_county",
+        "geo_lat",
+        "geo_lng",
+        "geo_radius_m",
+        "geo_candidates",
+        "createdAt",
+      ],
+      where: { location: { [Op.ne]: null } },
+      order: [["createdAt", "DESC"]],
+      limit: 2000,
+    });
+
+    // Rows added outside the public form (imports, seeds) have never been looked up
+    const unlooked = rows.filter((row) => !row.geo_status);
+    if (unlooked.length) {
+      await ServiceRequest.update(
+        { geo_status: "pending" },
+        { where: { id: unlooked.map((row) => row.id), geo_status: null }, silent: true }
+      );
+      unlooked.forEach((row) => {
+        row.geo_status = "pending";
+        queueGeocode(row.id);
+      });
+    }
+
+    const summary = { total: rows.length, found: 0, approximate: 0, not_found: 0, pending: 0, failed: 0 };
+    rows.forEach((row) => {
+      summary[row.geo_status || "pending"] += 1;
+    });
+
+    return res.status(200).json({ success: true, data: rows, summary });
+  } catch (error) {
+    return sendServerError(res, "fetching request locations", error);
+  }
+};
+
+// Admin: look the location up again, optionally searching a different place name
+exports.geocode = async (req, res) => {
+  try {
+    if (!UUID_REGEX.test(req.params.id)) return notFound(res);
+    const query = cleanText(req.body?.query, "location");
+    const request = await geocodeRequest(req.params.id, { query, fresh: true });
+    if (!request) return notFound(res);
+
+    return res.status(200).json({ success: true, data: await findDetailed(request.id) });
+  } catch (error) {
+    return sendValidationOrServerError(res, "looking up request location", error);
   }
 };
 

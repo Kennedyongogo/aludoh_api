@@ -11,6 +11,9 @@ const STATUSES = [
 
 const PRIORITIES = ["low", "normal", "high", "urgent"];
 
+// Result of looking up the typed location on OpenStreetMap (see services/geocoder.js)
+const GEO_STATUSES = ["pending", "found", "approximate", "not_found", "failed"];
+
 module.exports = (sequelize) => {
   const ServiceRequest = sequelize.define(
     "ServiceRequest",
@@ -107,6 +110,47 @@ module.exports = (sequelize) => {
         type: DataTypes.DATE,
         allowNull: true,
       },
+      // Estimated from the location text only; the client's device position is never collected
+      geo_status: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        validate: { isIn: [GEO_STATUSES] },
+      },
+      // Text that was searched: the client's location, or a name an admin tried instead
+      geo_query: {
+        type: DataTypes.STRING(160),
+        allowNull: true,
+      },
+      geo_place: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+      },
+      geo_county: {
+        type: DataTypes.STRING(60),
+        allowNull: true,
+      },
+      geo_lat: {
+        type: DataTypes.DOUBLE,
+        allowNull: true,
+      },
+      geo_lng: {
+        type: DataTypes.DOUBLE,
+        allowNull: true,
+      },
+      // How far from the pin the place may really be
+      geo_radius_m: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      // Other likely matches in different counties: [{ place, county, lat, lng }]
+      geo_candidates: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+      },
+      geocoded_at: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
     },
     {
       tableName: "service_requests",
@@ -122,6 +166,7 @@ module.exports = (sequelize) => {
 
   ServiceRequest.STATUSES = STATUSES;
   ServiceRequest.PRIORITIES = PRIORITIES;
+  ServiceRequest.GEO_STATUSES = GEO_STATUSES;
 
   return ServiceRequest;
 };

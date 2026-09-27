@@ -13,8 +13,10 @@ router.get("/track/:reference", publicLookupLimiter, ctrl.track);
 
 // Admin
 router.get("/", authenticateAdmin, ctrl.list);
+router.get("/locations", authenticateAdmin, ctrl.locations);
 router.get("/:id", authenticateAdmin, ctrl.getById);
 router.put("/:id", authenticateAdmin, ctrl.update);
+router.post("/:id/geocode", authenticateAdmin, ctrl.geocode);
 router.delete("/:id", authenticateAdmin, ctrl.remove);
 
 module.exports = router;
