@@ -4,12 +4,13 @@
   "description": "Duncan Muteti - mutetidanz@gmail.com",
   "main": "src/server.js",
   "scripts": {
-    "start": "nodemon src/server.js",
+    "start": "node scripts/devWatch.js",
+    "start:nodemon": "nodemon src/server.js",
     "start:cluster": "node src/cluster.js",
     "migrate:users": "node scripts/dropUserRoleStatus.js",
     "create:user": "node scripts/createUser.js",
     "migrate:service-requests": "node scripts/migrateServiceRequests.js",
-    "seed:service-requests": "node scripts/seedServiceRequests.js",
+    "migrate:content": "node scripts/migrateContentTables.js",
     "test": "echo \"No tests specified\" && exit 0"
   },
   "author": "Duncan Muteti",

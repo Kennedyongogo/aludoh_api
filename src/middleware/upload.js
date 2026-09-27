@@ -90,6 +90,46 @@ const uploadMediaFile = maybeMultipart(upload.single("file"));
 const uploadTestimonialPhoto = maybeMultipart(upload.single("photo"));
 const uploadLogo = maybeMultipart(upload.single("logo"));
 
+// Images for the website content managed in the admin, uploaded to /uploads/<folder>/
+const CONTENT_FOLDERS = ["services", "projects", "testimonials", "gallery", "courses", "articles", "certificates"];
+const CONTENT_IMAGE_MAX_MB = 10;
+const CONTENT_IMAGE_MAX_FILES = 10;
+// The saved extension comes from the type, never the original name, so an upload can't be
+// served back as HTML or script
+const IMAGE_EXTENSIONS = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+};
+
+const contentImageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const folder = req.params.folder;
+      if (!CONTENT_FOLDERS.includes(folder)) return cb(new Error("Unknown upload folder"));
+      const uploadPath = path.join(__dirname, "..", "..", "uploads", folder);
+      fs.mkdirSync(uploadPath, { recursive: true });
+      cb(null, uploadPath);
+    },
+    filename: (req, file, cb) => {
+      const basename = path
+        .basename(file.originalname, path.extname(file.originalname))
+        .replace(/[^a-zA-Z0-9]/g, "_")
+        .slice(0, 60);
+      const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      cb(null, `${basename || "image"}-${uniqueSuffix}${IMAGE_EXTENSIONS[file.mimetype]}`);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    if (IMAGE_EXTENSIONS[file.mimetype]) return cb(null, true);
+    cb(new Error("Invalid file type: only JPG, PNG, WEBP or GIF images can be uploaded"));
+  },
+  limits: { fileSize: CONTENT_IMAGE_MAX_MB * 1024 * 1024, files: CONTENT_IMAGE_MAX_FILES },
+});
+
+const uploadContentImages = contentImageUpload.array("images", CONTENT_IMAGE_MAX_FILES);
+
 const handleUploadError = (error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     if (error.code === "LIMIT_FILE_SIZE") {
@@ -144,6 +184,10 @@ module.exports = {
   uploadMediaFile,
   uploadTestimonialPhoto,
   uploadLogo,
+  uploadContentImages,
+  CONTENT_FOLDERS,
+  CONTENT_IMAGE_MAX_MB,
+  CONTENT_IMAGE_MAX_FILES,
   handleUploadError,
   deleteFile,
 };
